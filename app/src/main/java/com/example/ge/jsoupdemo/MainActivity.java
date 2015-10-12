@@ -1,8 +1,16 @@
 package com.example.ge.jsoupdemo;
 
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
@@ -16,6 +24,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -28,7 +37,27 @@ public class MainActivity extends Activity {
     private String feed;
     private ArrayList<String> arrayList;
     private ArrayAdapter<String> arrayAdapter;
-
+    private long myReference;
+    private DownloadManager downloadManager;
+    private BroadcastReceiver broadcastReceiver=new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            long reference = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+            if (reference == myReference) {
+                DownloadManager.Query query=new DownloadManager.Query();
+                query.setFilterById(reference);
+                Cursor myDownlod = downloadManager.query(query);
+                if (myDownlod.moveToFirst()) {
+                    int nameID = myDownlod.getColumnIndex(DownloadManager.COLUMN_LOCAL_FILENAME);
+                    int uriID = myDownlod.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+                    String name = myDownlod.getString(nameID);
+                    String uri = myDownlod.getString(uriID);
+                    Log.d("name:uri", name + ":" + uri);
+                }
+                myDownlod.close();
+            }
+        }
+    };
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -46,7 +75,33 @@ public class MainActivity extends Activity {
         arrayList.add("网站链接");
         final TextView textView_connect_status = (TextView) findViewById(R.id.textview_connect_status);
         Button button_connect = (Button) findViewById(R.id.button_connect);
+        Button button_download = (Button) findViewById(R.id.button_download);
         feed = getString(R.string.feed);
+        final AsyncTask<String,Integer,String> asyncTask_download=new AsyncTask<String, Integer, String>() {
+            @Override
+            protected String doInBackground(String... params) {
+                /*下载链接*/
+                String link=params[0];
+                String result="";
+                int status=0;
+                //下载状态
+                publishProgress(status);
+                /*进行下载*/
+                IntentFilter intentFilter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+                registerReceiver(broadcastReceiver, intentFilter);
+                download(link);
+                return result;
+            }
+
+            @Override
+            protected void onProgressUpdate(Integer... values) {
+                if (values[0] == 0) {
+                    textView_connect_status.setText("Downloading");
+                }else if(values[0]==1){
+
+                }
+            }
+        };
         final AsyncTask<String, Void, String> asyncTask = new AsyncTask<String, Void, String>() {
             @Override
             protected void onPostExecute(String s) {
@@ -121,9 +176,49 @@ public class MainActivity extends Activity {
                 asyncTask.execute(feed);
             }
         });
+        button_download.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String link = getString(R.string.download_link);
+                asyncTask_download.execute(link);
+            }
+        });
     }
 
+    private void download(String link){
+        String feed=link;
+        downloadManager = (DownloadManager)getSystemService(Context.DOWNLOAD_SERVICE);
+        Uri uri = Uri.parse(feed);
+        DownloadManager.Request request = new DownloadManager.Request(uri);
+        /*可以设置request属性，来确定下载的位置，名称，特性等*/
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+       /*以下注释之间的代码，去掉则默认下载位置，没有错误。*/
+        String path = Environment.getExternalStorageDirectory().toString();
+        File file = new File(path);
+        Log.d("Location:", path);
+        request.setDestinationUri(Uri.fromFile(file));
+        /*这部分是设置路径的，尚未解决。*/
+        request.setTitle("百度音乐");
+        request.setDescription("百度音乐APP");
+        /**********************************************/
 
+        myReference=downloadManager.enqueue(request);
+        DownloadManager.Query failedDownloadQuery=new DownloadManager.Query();
+        failedDownloadQuery.setFilterByStatus(DownloadManager.STATUS_FAILED);
+        Cursor failedDownload = downloadManager.query(failedDownloadQuery);
+        int reasonID = failedDownload.getColumnIndex(DownloadManager.COLUMN_REASON);
+        while (failedDownload.moveToNext()) {
+            int reason = failedDownload.getInt(reasonID);
+            Log.d("Reason:", Integer.toString(reason));
+            /*错误状态1001*/
+            /*错误为ERROR_FAIL_ERROR*/
+            /*这部分在安卓文件学习中尝试解决*/
+        }
+        failedDownload.close();
+        //Log.d(T, Long.toString(reference));
+
+
+    }
     private boolean refreshEarthquakes(String feed) {
         URL url;
         String quakeFeed = feed;
